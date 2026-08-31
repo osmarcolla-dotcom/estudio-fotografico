@@ -19,9 +19,21 @@ export class MercadoPagoGateway implements PaymentGateway {
       return new UnconfiguredPaymentGateway().createCheckout(order);
     }
 
-    // Exemplo de integração nativa do MercadoPago Preference/PIX
-    // Em produção, usa a API oficial do MercadoPago
     try {
+      // Determina a URL base pública (prioriza a URL de produção na Vercel)
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')
+          ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
+          : 'https://estudio-fotografico-app.vercel.app';
+
+      // Garante e-mail válido aceito pelo validador do Mercado Pago
+      const rawEmail = order.customer?.email || '';
+      const cleanPhone = (order.customer?.whatsapp || '').replace(/\D/g, '');
+      const validEmail =
+        rawEmail && rawEmail.includes('@') && rawEmail.includes('.') && !rawEmail.endsWith('.estudio')
+          ? rawEmail
+          : `cliente.${cleanPhone || Date.now()}@estudiofotografico.com.br`;
+
       const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
         method: 'POST',
         headers: {
@@ -36,44 +48,45 @@ export class MercadoPagoGateway implements PaymentGateway {
               description: `${order.package_name} - ${order.package_photo_count} fotos em alta resolução`,
               quantity: 1,
               currency_id: 'BRL',
-              unit_price: order.package_price_cents / 100,
+              unit_price: Number((order.package_price_cents / 100).toFixed(2)),
             },
           ],
           payer: {
-            name: order.customer?.name,
-            email: order.customer?.email,
+            name: order.customer?.name || 'Cliente Estúdio',
+            email: validEmail,
             phone: {
-              number: order.customer?.whatsapp,
+              number: cleanPhone || '999999999',
             },
           },
           external_reference: order.id,
           back_urls: {
-            success: `${process.env.NEXT_PUBLIC_APP_URL}/pedido/${order.id}?status=success`,
-            pending: `${process.env.NEXT_PUBLIC_APP_URL}/pedido/${order.id}?status=pending`,
-            failure: `${process.env.NEXT_PUBLIC_APP_URL}/pedido/${order.id}?status=failure`,
+            success: `${baseUrl}/pedido/${order.id}?status=success`,
+            pending: `${baseUrl}/pedido/${order.id}?status=pending`,
+            failure: `${baseUrl}/pedido/${order.id}?status=failure`,
           },
           auto_return: 'approved',
-          notification_url: `${process.env.NEXT_PUBLIC_APP_URL}/api/payments/webhook/mercadopago`,
         }),
       });
 
       const data = await response.json();
-      if (data && data.init_point) {
+
+      if (response.ok && data && (data.init_point || data.sandbox_init_point)) {
         return {
           paymentId: order.payment?.id || `mp-${order.id}`,
-          checkoutUrl: data.init_point,
+          checkoutUrl: data.init_point || data.sandbox_init_point,
           provider: this.name,
           transactionId: data.id,
         };
       }
 
-      throw new Error(data.message || 'Falha ao criar preferência no MercadoPago');
+      console.error('Erro na resposta do Mercado Pago:', data);
+      throw new Error(data.message || data.error || 'Falha ao criar preferência de pagamento no Mercado Pago');
     } catch (err: any) {
       console.error('Erro no MercadoPago Gateway:', err);
       return {
         paymentId: order.payment?.id || `mp-${order.id}`,
         provider: this.name,
-        instructions: 'Erro ao conectar ao MercadoPago. Tente novamente mais tarde.',
+        instructions: err.message || 'Erro ao conectar ao Mercado Pago.',
       };
     }
   }
@@ -82,13 +95,12 @@ export class MercadoPagoGateway implements PaymentGateway {
     if (!this.isConfigured()) {
       return {
         success: false,
-        message: 'MercadoPago não configurado.',
+        message: 'Mercado Pago não configurado.',
       };
     }
 
     try {
       const parsed = JSON.parse(payload.rawBody);
-      // Processamento de notificação de pagamento do MercadoPago
       if (parsed.type === 'payment' && parsed.data?.id) {
         const paymentId = parsed.data.id;
         const res = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
@@ -105,14 +117,14 @@ export class MercadoPagoGateway implements PaymentGateway {
             transactionId: paymentData.id.toString(),
             status: 'PAID',
             amountCents: Math.round(paymentData.transaction_amount * 100),
-            message: 'Pagamento aprovado via MercadoPago.',
+            message: 'Pagamento aprovado via Mercado Pago.',
           };
         }
       }
 
       return {
         success: true,
-        message: 'Webhook recebido mas não exigiu alteração de status.',
+        message: 'Webhook recebido.',
       };
     } catch (err: any) {
       return {
