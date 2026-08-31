@@ -14,19 +14,81 @@ export class MercadoPagoGateway implements PaymentGateway {
     return Boolean(this.accessToken && this.accessToken.trim().length > 10);
   }
 
+  /**
+   * 1. Gera o PIX direto (QR Code na tela + Código Copia e Cola instantâneo)
+   * Sem tela feia ou intermediários!
+   */
+  async createPixPayment(order: Order): Promise<CheckoutSessionResult> {
+    if (!this.isConfigured()) {
+      return new UnconfiguredPaymentGateway().createCheckout(order);
+    }
+
+    try {
+      const rawEmail = order.customer?.email || '';
+      const cleanPhone = (order.customer?.whatsapp || '').replace(/\D/g, '');
+      const validEmail =
+        rawEmail && rawEmail.includes('@') && rawEmail.includes('.') && !rawEmail.endsWith('.estudio')
+          ? rawEmail
+          : `cliente.${cleanPhone || Date.now()}@estudiofotografico.com.br`;
+
+      const response = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.accessToken}`,
+          'X-Idempotency-Key': `pix-${order.id}`,
+        },
+        body: JSON.stringify({
+          transaction_amount: Number((order.package_price_cents / 100).toFixed(2)),
+          description: `Ensaio Fotográfico - ${order.category_name} (${order.style_name})`,
+          payment_method_id: 'pix',
+          payer: {
+            email: validEmail,
+            first_name: order.customer?.name || 'Cliente',
+            last_name: 'Estúdio',
+          },
+          external_reference: order.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data && data.point_of_interaction?.transaction_data) {
+        const txData = data.point_of_interaction.transaction_data;
+
+        return {
+          paymentId: data.id?.toString() || `pix-${order.id}`,
+          transactionId: data.id?.toString(),
+          provider: this.name,
+          qrCodeBase64: txData.qr_code_base64,
+          pixCopiaECola: txData.qr_code,
+          checkoutUrl: txData.ticket_url,
+          paymentMethod: 'pix',
+        };
+      }
+
+      // Se falhar o PIX direto, cai no checkout transparente
+      return this.createCheckout(order);
+    } catch (err: any) {
+      console.error('Erro ao gerar PIX direto:', err);
+      return this.createCheckout(order);
+    }
+  }
+
+  /**
+   * 2. Gera a preferência de checkout com PIX e Cartão de Crédito
+   */
   async createCheckout(order: Order): Promise<CheckoutSessionResult> {
     if (!this.isConfigured()) {
       return new UnconfiguredPaymentGateway().createCheckout(order);
     }
 
     try {
-      // Determina a URL base pública (prioriza a URL de produção na Vercel)
       const baseUrl =
         process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')
           ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
           : 'https://estudio-fotografico-app.vercel.app';
 
-      // Garante e-mail válido aceito pelo validador do Mercado Pago
       const rawEmail = order.customer?.email || '';
       const cleanPhone = (order.customer?.whatsapp || '').replace(/\D/g, '');
       const validEmail =
@@ -79,7 +141,6 @@ export class MercadoPagoGateway implements PaymentGateway {
         };
       }
 
-      console.error('Erro na resposta do Mercado Pago:', data);
       throw new Error(data.message || data.error || 'Falha ao criar preferência de pagamento no Mercado Pago');
     } catch (err: any) {
       console.error('Erro no MercadoPago Gateway:', err);

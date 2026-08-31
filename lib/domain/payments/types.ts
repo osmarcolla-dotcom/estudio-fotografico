@@ -4,10 +4,12 @@ export interface CheckoutSessionResult {
   paymentId: string;
   checkoutUrl?: string;
   qrCodePix?: string;
+  qrCodeBase64?: string;
   pixCopiaECola?: string;
   instructions?: string;
   provider: string;
   transactionId?: string;
+  paymentMethod?: 'pix' | 'all';
 }
 
 export interface PaymentWebhookPayload {
@@ -30,6 +32,7 @@ export interface PaymentGateway {
   name: string;
   isConfigured(): boolean;
   createCheckout(order: Order): Promise<CheckoutSessionResult>;
+  createPixPayment?(order: Order): Promise<CheckoutSessionResult>;
   verifyWebhook(payload: PaymentWebhookPayload): Promise<WebhookProcessingResult>;
   refund(payment: Payment): Promise<boolean>;
 }

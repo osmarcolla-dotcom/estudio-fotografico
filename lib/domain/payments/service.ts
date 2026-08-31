@@ -15,8 +15,17 @@ export class PaymentService {
     return new UnconfiguredPaymentGateway();
   }
 
+  /**
+   * Inicia o pagamento gerando tanto o PIX instantâneo quanto o link de Cartão
+   */
   static async initiatePayment(order: Order): Promise<CheckoutSessionResult> {
     const gateway = this.getGateway();
+
+    // Se o gateway suportar PIX direto nativo
+    if (gateway.createPixPayment) {
+      return gateway.createPixPayment(order);
+    }
+
     return gateway.createCheckout(order);
   }
 
