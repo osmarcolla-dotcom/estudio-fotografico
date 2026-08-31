@@ -19,6 +19,7 @@ import {
   Calendar,
   User,
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 interface PaymentCheckoutClientProps {
   order: Order;
@@ -59,6 +60,19 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
   const qrImage = checkout?.qrCodeBase64
     ? `data:image/png;base64,${checkout.qrCodeBase64}`
     : null;
+
+  const triggerCelebration = () => {
+    try {
+      confetti({
+        particleCount: 90,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#315B52', '#C98576', '#D9D1C2', '#17212B'],
+      });
+    } catch {
+      // Silencioso se bloqueado
+    }
+  };
 
   // Formatação de Cartão
   const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,6 +146,7 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
       }
 
       setIsPaid(true);
+      triggerCelebration();
       router.refresh();
     } catch (err: any) {
       setCardError(err.message || 'Erro ao processar pagamento com cartão.');
@@ -151,6 +166,7 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
 
         if (data.isPaid) {
           setIsPaid(true);
+          triggerCelebration();
           clearInterval(interval);
           router.refresh();
         }
@@ -165,7 +181,7 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
   if (isPaid) {
     return (
       <div className="bg-[#FFFDF9] border border-[#E6E1D8] rounded-3xl p-8 sm:p-12 shadow-sm text-center space-y-6">
-        <div className="w-16 h-16 rounded-full bg-[#315B52] text-[#FFFDF9] flex items-center justify-center mx-auto shadow-md">
+        <div className="w-16 h-16 rounded-full bg-[#315B52] text-[#FFFDF9] flex items-center justify-center mx-auto shadow-md animate-bounce">
           <CheckCircle2 className="w-8 h-8 text-[#D9D1C2]" />
         </div>
 
