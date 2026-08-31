@@ -12,114 +12,139 @@ export class OrderService {
     const token = crypto.randomBytes(24).toString('hex');
     const orderId = crypto.randomUUID();
 
-    // 1. Obter informações de pacote, categoria e estilo
-    const category = DEFAULT_CATEGORIES.find((c) => c.id === input.categoryId) || {
-      name: 'Ensaio Personalizado',
-      slug: 'personalizado',
-    };
-    const packageItem = DEFAULT_PACKAGES.find((p) => p.id === input.packageId) || {
-      name: 'Pacote Profissional',
-      photo_count: 12,
-      price_cents: 2990,
-    };
-    const style = DEFAULT_STYLES.find((s) => s.id === input.styleId) || {
-      name: 'Estúdio Elegante',
-      slug: 'elegante',
-    };
+    // Valores padrão de fallback
+    let categoryName = 'Ensaio Personalizado';
+    let packageName = 'Pacote Selecionado';
+    let packagePhotoCount = 6;
+    let packagePriceCents = 1990;
+    let styleName = 'Estúdio Elegante';
 
-    if (!supabase) {
-      // Retorna em modo local sem Supabase configurado
-      return { orderId, orderNumber, token };
-    }
+    if (supabase) {
+      try {
+        // 1. Busca os dados REAIS e dinâmicos do pacote, categoria e estilo no Supabase
+        const [pkgRes, catRes, styRes] = await Promise.all([
+          supabase.from('packages').select('*').eq('id', input.packageId).maybeSingle(),
+          supabase.from('categories').select('*').eq('id', input.categoryId).maybeSingle(),
+          supabase.from('styles').select('*').eq('id', input.styleId).maybeSingle(),
+        ]);
 
-    try {
-      // Criar ou atualizar cliente (por WhatsApp ou E-mail)
-      let customerId: string;
-      const cleanPhone = input.customer.whatsapp.replace(/\D/g, '');
-      const customerEmail = input.customer.email || `${cleanPhone}@cliente.estudio`;
+        if (pkgRes.data) {
+          packageName = pkgRes.data.name;
+          packagePhotoCount = pkgRes.data.photo_count;
+          packagePriceCents = pkgRes.data.price_cents;
+        } else {
+          const fallbackPkg = DEFAULT_PACKAGES.find((p) => p.id === input.packageId);
+          if (fallbackPkg) {
+            packageName = fallbackPkg.name;
+            packagePhotoCount = fallbackPkg.photo_count;
+            packagePriceCents = fallbackPkg.price_cents;
+          }
+        }
 
-      const { data: existingCustomer } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('whatsapp', input.customer.whatsapp)
-        .maybeSingle();
+        if (catRes.data) {
+          categoryName = catRes.data.name;
+        } else {
+          const fallbackCat = DEFAULT_CATEGORIES.find((c) => c.id === input.categoryId);
+          if (fallbackCat) categoryName = fallbackCat.name;
+        }
 
-      if (existingCustomer) {
-        customerId = existingCustomer.id;
-        await supabase
+        if (styRes.data) {
+          styleName = styRes.data.name;
+        } else {
+          const fallbackSty = DEFAULT_STYLES.find((s) => s.id === input.styleId);
+          if (fallbackSty) styleName = fallbackSty.name;
+        }
+
+        // 2. Criar ou atualizar cliente (por WhatsApp ou E-mail)
+        let customerId: string;
+        const cleanPhone = input.customer.whatsapp.replace(/\D/g, '');
+        const customerEmail = input.customer.email || `${cleanPhone}@cliente.estudio`;
+
+        const { data: existingCustomer } = await supabase
           .from('customers')
-          .update({
-            name: input.customer.name,
-            email: customerEmail,
-          })
-          .eq('id', customerId);
-      } else {
-        const { data: newCustomer, error: custErr } = await supabase
-          .from('customers')
-          .insert({
-            name: input.customer.name,
-            email: customerEmail,
-            whatsapp: input.customer.whatsapp,
-          })
           .select('id')
-          .single();
+          .eq('whatsapp', input.customer.whatsapp)
+          .maybeSingle();
 
-        if (custErr || !newCustomer) throw new Error('Falha ao cadastrar cliente');
-        customerId = newCustomer.id;
-      }
+        if (existingCustomer) {
+          customerId = existingCustomer.id;
+          await supabase
+            .from('customers')
+            .update({
+              name: input.customer.name,
+              email: customerEmail,
+            })
+            .eq('id', customerId);
+        } else {
+          const { data: newCustomer, error: custErr } = await supabase
+            .from('customers')
+            .insert({
+              name: input.customer.name,
+              email: customerEmail,
+              whatsapp: input.customer.whatsapp,
+            })
+            .select('id')
+            .single();
 
-      // Criar Pedido com valores congelados
-      const { error: orderErr } = await supabase.from('orders').insert({
-        id: orderId,
-        order_number: orderNumber,
-        customer_id: customerId,
-        category_id: input.categoryId,
-        style_id: input.styleId,
-        package_id: input.packageId,
-        package_name: packageItem.name,
-        package_photo_count: packageItem.photo_count,
-        package_price_cents: packageItem.price_cents,
-        category_name: category.name,
-        style_name: style.name,
-        status: 'PENDING_PAYMENT',
-        notes: input.notes || null,
-      });
+          if (custErr || !newCustomer) throw new Error('Falha ao cadastrar cliente');
+          customerId = newCustomer.id;
+        }
 
-      if (orderErr) throw new Error(`Falha ao criar pedido: ${orderErr.message}`);
+        // 3. Criar Pedido com os valores REAIS congelados
+        const { error: orderErr } = await supabase.from('orders').insert({
+          id: orderId,
+          order_number: orderNumber,
+          customer_id: customerId,
+          category_id: input.categoryId,
+          style_id: input.styleId,
+          package_id: input.packageId,
+          package_name: packageName,
+          package_photo_count: packagePhotoCount,
+          package_price_cents: packagePriceCents,
+          category_name: categoryName,
+          style_name: styleName,
+          status: 'PENDING_PAYMENT',
+          notes: input.notes || null,
+        });
 
-      // Registrar pagamento pendente
-      await supabase.from('payments').insert({
-        order_id: orderId,
-        amount_cents: packageItem.price_cents,
-        status: 'PENDING',
-        provider: process.env.PAYMENT_PROVIDER || 'unconfigured',
-      });
+        if (orderErr) throw new Error(`Falha ao criar pedido: ${orderErr.message}`);
 
-      // Registrar fotos enviadas pelo cliente
-      if (input.uploadedPhotos && input.uploadedPhotos.length > 0) {
-        const photoInserts = input.uploadedPhotos.map((p, idx) => ({
+        // 4. Registrar pagamento pendente com o valor exato
+        await supabase.from('payments').insert({
           order_id: orderId,
-          storage_path: p.storagePath || `customer-uploads/${orderId}/photo_${idx + 1}.jpg`,
-          file_name: p.fileName,
-          file_size_bytes: p.fileSize,
-          mime_type: p.mimeType,
-          width: p.width || null,
-          height: p.height || null,
-        }));
-        await supabase.from('customer_photos').insert(photoInserts);
+          amount_cents: packagePriceCents,
+          status: 'PENDING',
+          provider: process.env.PAYMENT_PROVIDER || 'mercadopago',
+        });
+
+        // 5. Registrar fotos enviadas pelo cliente
+        if (input.uploadedPhotos && input.uploadedPhotos.length > 0) {
+          const photoInserts = input.uploadedPhotos.map((p, idx) => ({
+            order_id: orderId,
+            storage_path: p.storagePath || `customer-uploads/${orderId}/photo_${idx + 1}.jpg`,
+            file_name: p.fileName,
+            file_size_bytes: p.fileSize,
+            mime_type: p.mimeType,
+            width: p.width || null,
+            height: p.height || null,
+          }));
+          await supabase.from('customer_photos').insert(photoInserts);
+        }
+
+        // 6. Criar link exclusivo de aprovação
+        await supabase.from('approval_links').insert({
+          order_id: orderId,
+          token: token,
+        });
+
+        return { orderId, orderNumber, token };
+      } catch (err: any) {
+        console.error('Erro no OrderService.createOrder:', err);
+        return { orderId, orderNumber, token };
       }
-
-      // Criar link exclusivo de aprovação
-      await supabase.from('approval_links').insert({
-        order_id: orderId,
-        token: token,
-      });
-
-      return { orderId, orderNumber, token };
-    } catch (err: any) {
-      console.error('Erro no OrderService.createOrder:', err);
-      return { orderId, orderNumber, token };
     }
+
+    return { orderId, orderNumber, token };
   }
 
   static async getOrderById(orderId: string): Promise<Order | null> {
@@ -164,7 +189,6 @@ export class OrderService {
 
       if (linkErr || !linkData) return null;
 
-      // Incrementar contador de visualizações
       try {
         await supabase.rpc('increment_view_count', { link_token: token });
       } catch {

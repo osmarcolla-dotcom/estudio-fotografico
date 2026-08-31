@@ -44,7 +44,14 @@ export function CategoryStep({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {categories.map((cat) => {
           const isSelected = selectedCategoryId === cat.id;
-          const imageUrl = cat.sample_image_url || CATEGORY_IMAGES[cat.slug] || CATEGORY_IMAGES['gravidez'];
+
+          // Se a imagem cadastrada for válida (http/https), usa ela; senão usa a foto HD do catálogo
+          const validSample =
+            cat.sample_image_url && cat.sample_image_url.startsWith('http')
+              ? cat.sample_image_url
+              : null;
+
+          const imageUrl = validSample || CATEGORY_IMAGES[cat.slug] || CATEGORY_IMAGES['gravidez'];
 
           return (
             <button
