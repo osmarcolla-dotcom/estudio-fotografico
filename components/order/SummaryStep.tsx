@@ -90,10 +90,6 @@ export function SummaryStep({
                 <Phone className="w-4 h-4 text-[#5E6973]" />
                 <span>{formatWhatsApp(customer.whatsapp)}</span>
               </div>
-              <div className="flex items-center gap-2.5">
-                <Mail className="w-4 h-4 text-[#5E6973]" />
-                <span>{customer.email}</span>
-              </div>
             </div>
           </div>
 

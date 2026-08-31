@@ -220,11 +220,6 @@ function DirectOrderFlow() {
               </span>
             </div>
           </div>
-
-          <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold uppercase text-[#315B52] bg-[#ECE7DF] px-3 py-1 rounded-full">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Atendimento WhatsApp</span>
-          </div>
         </div>
       </header>
 

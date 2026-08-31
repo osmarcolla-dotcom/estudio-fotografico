@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const customerDataSchema = z.object({
   name: z
     .string()
-    .min(3, 'O nome deve ter pelo menos 3 caracteres')
+    .min(2, 'Informe seu nome completo')
     .max(100, 'O nome deve ter no máximo 100 caracteres'),
   whatsapp: z
     .string()
@@ -12,7 +12,9 @@ export const customerDataSchema = z.object({
     .regex(/^[\d\s()+-]+$/, 'Formato de WhatsApp inválido'),
   email: z
     .string()
-    .email('Informe um e-mail válido'),
+    .email('Informe um e-mail válido')
+    .optional()
+    .or(z.literal('')),
 });
 
 export const orderCreationSchema = z.object({

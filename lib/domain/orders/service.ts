@@ -33,12 +33,15 @@ export class OrderService {
     }
 
     try {
-      // Criar ou atualizar cliente
+      // Criar ou atualizar cliente (por WhatsApp ou E-mail)
       let customerId: string;
+      const cleanPhone = input.customer.whatsapp.replace(/\D/g, '');
+      const customerEmail = input.customer.email || `${cleanPhone}@cliente.estudio`;
+
       const { data: existingCustomer } = await supabase
         .from('customers')
         .select('id')
-        .eq('email', input.customer.email)
+        .eq('whatsapp', input.customer.whatsapp)
         .maybeSingle();
 
       if (existingCustomer) {
@@ -47,7 +50,7 @@ export class OrderService {
           .from('customers')
           .update({
             name: input.customer.name,
-            whatsapp: input.customer.whatsapp,
+            email: customerEmail,
           })
           .eq('id', customerId);
       } else {
@@ -55,7 +58,7 @@ export class OrderService {
           .from('customers')
           .insert({
             name: input.customer.name,
-            email: input.customer.email,
+            email: customerEmail,
             whatsapp: input.customer.whatsapp,
           })
           .select('id')
