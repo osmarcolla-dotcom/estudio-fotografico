@@ -22,6 +22,7 @@ interface PaymentCheckoutClientProps {
   checkout: {
     paymentId?: string;
     checkoutUrl?: string;
+    cardCheckoutUrl?: string;
     qrCodeBase64?: string;
     pixCopiaECola?: string;
     paymentMethod?: string;
@@ -32,7 +33,6 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<'pix' | 'card'>('pix');
-  const [isChecking, setIsChecking] = useState(false);
   const [isPaid, setIsPaid] = useState(
     order.status === 'PAID' ||
       order.status === 'PRODUCTION_QUEUED' ||
@@ -46,6 +46,7 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
   const qrImage = checkout?.qrCodeBase64
     ? `data:image/png;base64,${checkout.qrCodeBase64}`
     : null;
+  const cardUrl = checkout?.cardCheckoutUrl || checkout?.checkoutUrl;
 
   // Copiar código PIX
   const handleCopyPix = () => {
@@ -55,7 +56,7 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
     setTimeout(() => setCopied(false), 3000);
   };
 
-  // Polling automático para detectar quando o PIX for pago
+  // Polling automático para detectar quando o pagamento for confirmado
   useEffect(() => {
     if (isPaid) return;
 
@@ -221,10 +222,10 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
                 </p>
               </div>
             </>
-          ) : checkout?.checkoutUrl ? (
+          ) : cardUrl ? (
             <div className="space-y-4 max-w-md mx-auto">
               <a
-                href={checkout.checkoutUrl}
+                href={cardUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-4 px-6 rounded-full bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] text-sm font-bold uppercase tracking-wider inline-flex items-center justify-center gap-2 shadow-lg transition-all"
@@ -249,16 +250,16 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
 
             <div className="space-y-1">
               <h3 className="font-serif text-xl font-bold text-[#17212B]">
-                Pagamento com Cartão
+                Pagamento com Cartão de Crédito
               </h3>
               <p className="text-xs text-[#5E6973]">
-                Pague em ambiente 100% criptografado e seguro com aprovação imediata.
+                Pague em ambiente 100% criptografado com opção de parcelamento e aprovação imediata.
               </p>
             </div>
 
-            {checkout?.checkoutUrl && (
+            {cardUrl ? (
               <a
-                href={checkout.checkoutUrl}
+                href={cardUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full py-4 px-6 rounded-full bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] text-sm font-bold uppercase tracking-wider inline-flex items-center justify-center gap-2 shadow-xl transition-all"
@@ -266,6 +267,8 @@ export function PaymentCheckoutClient({ order, checkout }: PaymentCheckoutClient
                 <span>PAGAR COM CARTÃO DE CRÉDITO</span>
                 <ExternalLink className="w-4 h-4" />
               </a>
+            ) : (
+              <p className="text-xs text-[#5E6973]">Carregando ambiente seguro de cartão...</p>
             )}
           </div>
         </div>

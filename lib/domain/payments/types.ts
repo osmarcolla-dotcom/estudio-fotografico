@@ -3,13 +3,14 @@ import { Order, Payment } from '@/lib/types';
 export interface CheckoutSessionResult {
   paymentId: string;
   checkoutUrl?: string;
+  cardCheckoutUrl?: string;
   qrCodePix?: string;
   qrCodeBase64?: string;
   pixCopiaECola?: string;
   instructions?: string;
   provider: string;
   transactionId?: string;
-  paymentMethod?: 'pix' | 'all';
+  paymentMethod?: 'pix' | 'card' | 'all';
 }
 
 export interface PaymentWebhookPayload {
