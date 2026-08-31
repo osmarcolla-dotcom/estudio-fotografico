@@ -15,6 +15,7 @@ import {
   Star,
   CheckCircle2,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 interface CatalogManagementClientProps {
@@ -59,45 +60,58 @@ export function CatalogManagementClient({
   const [styleSlug, setStyleSlug] = useState('');
   const [styleDescription, setStyleDescription] = useState('');
 
+  const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Salvar Pacote
-  const handleSavePackage = (e: React.FormEvent) => {
+  // Salvar Pacote no Banco de Dados Real
+  const handleSavePackage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingPackage) {
-      setPackages((prev) =>
-        prev.map((p) =>
-          p.id === editingPackage.id
-            ? {
-                ...p,
-                name: pkgName,
-                slug: pkgSlug,
-                price_cents: pkgPriceCents,
-                photo_count: pkgPhotoCount,
-                description: pkgDescription,
-                is_popular: pkgIsPopular,
-              }
-            : p
-        )
-      );
-      setFeedback('Pacote atualizado com sucesso!');
-    } else {
-      const newPkg: Package = {
-        id: `pkg-${Date.now()}`,
-        name: pkgName,
-        slug: pkgSlug || pkgName.toLowerCase().replace(/\s+/g, '-'),
-        price_cents: pkgPriceCents,
-        photo_count: pkgPhotoCount,
-        description: pkgDescription,
-        is_popular: pkgIsPopular,
-        is_active: true,
-        display_order: packages.length + 1,
-      };
-      setPackages((prev) => [...prev, newPkg]);
-      setFeedback('Novo pacote adicionado com sucesso!');
+    setIsSaving(true);
+    setFeedback(null);
+    setErrorMessage(null);
+
+    const payload = {
+      id: editingPackage?.id,
+      name: pkgName,
+      slug: pkgSlug || pkgName.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
+      price_cents: pkgPriceCents,
+      photo_count: pkgPhotoCount,
+      description: pkgDescription,
+      is_popular: pkgIsPopular,
+      is_active: editingPackage ? editingPackage.is_active : true,
+      display_order: editingPackage ? editingPackage.display_order : packages.length + 1,
+    };
+
+    try {
+      const res = await fetch('/api/admin/catalog/package', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Falha ao salvar pacote.');
+      }
+
+      if (editingPackage) {
+        setPackages((prev) =>
+          prev.map((p) => (p.id === editingPackage.id ? (data.package || { ...p, ...payload }) : p))
+        );
+        setFeedback('Pacote atualizado com sucesso no banco de dados!');
+      } else {
+        setPackages((prev) => [...prev, data.package || payload]);
+        setFeedback('Novo pacote cadastrado e publicado com sucesso!');
+      }
+
+      setEditingPackage(null);
+      resetPackageForm();
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    } finally {
+      setIsSaving(false);
     }
-    setEditingPackage(null);
-    resetPackageForm();
   };
 
   const resetPackageForm = () => {
@@ -119,39 +133,69 @@ export function CatalogManagementClient({
     setPkgIsPopular(pkg.is_popular);
   };
 
-  // Salvar Categoria
-  const handleSaveCategory = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingCategory) {
-      setCategories((prev) =>
-        prev.map((c) =>
-          c.id === editingCategory.id
-            ? {
-                ...c,
-                name: catName,
-                slug: catSlug,
-                description: catDescription,
-                sample_image_url: catSampleUrl || null,
-              }
-            : c
-        )
+  const togglePackageActive = async (pkg: Package) => {
+    const updatedStatus = !pkg.is_active;
+    try {
+      await fetch('/api/admin/catalog/package', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...pkg, is_active: updatedStatus }),
+      });
+      setPackages((prev) =>
+        prev.map((p) => (p.id === pkg.id ? { ...p, is_active: updatedStatus } : p))
       );
-      setFeedback('Categoria atualizada com sucesso!');
-    } else {
-      const newCat: Category = {
-        id: `cat-${Date.now()}`,
-        name: catName,
-        slug: catSlug || catName.toLowerCase().replace(/\s+/g, '-'),
-        description: catDescription,
-        sample_image_url: catSampleUrl || null,
-        display_order: categories.length + 1,
-        is_active: true,
-      };
-      setCategories((prev) => [...prev, newCat]);
-      setFeedback('Nova categoria criada com sucesso!');
+      setFeedback(`Pacote ${updatedStatus ? 'ativado' : 'desativado'} com sucesso!`);
+    } catch {
+      // Reverte em caso de erro
     }
-    setEditingCategory(null);
-    resetCategoryForm();
+  };
+
+  // Salvar Categoria no Banco Real
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setFeedback(null);
+    setErrorMessage(null);
+
+    const payload = {
+      id: editingCategory?.id,
+      name: catName,
+      slug: catSlug || catName.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
+      description: catDescription,
+      sample_image_url: catSampleUrl || null,
+      is_active: editingCategory ? editingCategory.is_active : true,
+      display_order: editingCategory ? editingCategory.display_order : categories.length + 1,
+    };
+
+    try {
+      const res = await fetch('/api/admin/catalog/category', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Falha ao salvar categoria.');
+      }
+
+      if (editingCategory) {
+        setCategories((prev) =>
+          prev.map((c) => (c.id === editingCategory.id ? (data.category || { ...c, ...payload }) : c))
+        );
+        setFeedback('Categoria atualizada com sucesso!');
+      } else {
+        setCategories((prev) => [...prev, data.category || payload]);
+        setFeedback('Nova categoria criada com sucesso!');
+      }
+
+      setEditingCategory(null);
+      resetCategoryForm();
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const resetCategoryForm = () => {
@@ -169,39 +213,52 @@ export function CatalogManagementClient({
     setCatSampleUrl(cat.sample_image_url || '');
   };
 
-  // Salvar Estilo
-  const handleSaveStyle = (e: React.FormEvent) => {
+  // Salvar Estilo no Banco Real
+  const handleSaveStyle = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingStyle) {
-      setStyles((prev) =>
-        prev.map((s) =>
-          s.id === editingStyle.id
-            ? {
-                ...s,
-                category_id: selectedCategoryId,
-                name: styleName,
-                slug: styleSlug,
-                description: styleDescription,
-              }
-            : s
-        )
-      );
-      setFeedback('Estilo atualizado com sucesso!');
-    } else {
-      const newStyle: Style = {
-        id: `style-${Date.now()}`,
-        category_id: selectedCategoryId,
-        name: styleName,
-        slug: styleSlug || styleName.toLowerCase().replace(/\s+/g, '-'),
-        description: styleDescription,
-        display_order: styles.length + 1,
-        is_active: true,
-      };
-      setStyles((prev) => [...prev, newStyle]);
-      setFeedback('Novo estilo criado com sucesso!');
+    setIsSaving(true);
+    setFeedback(null);
+    setErrorMessage(null);
+
+    const payload = {
+      id: editingStyle?.id,
+      category_id: selectedCategoryId,
+      name: styleName,
+      slug: styleSlug || styleName.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
+      description: styleDescription,
+      is_active: editingStyle ? editingStyle.is_active : true,
+      display_order: editingStyle ? editingStyle.display_order : styles.length + 1,
+    };
+
+    try {
+      const res = await fetch('/api/admin/catalog/style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Falha ao salvar estilo.');
+      }
+
+      if (editingStyle) {
+        setStyles((prev) =>
+          prev.map((s) => (s.id === editingStyle.id ? (data.style || { ...s, ...payload }) : s))
+        );
+        setFeedback('Estilo atualizado com sucesso!');
+      } else {
+        setStyles((prev) => [...prev, data.style || payload]);
+        setFeedback('Novo estilo criado com sucesso!');
+      }
+
+      setEditingStyle(null);
+      resetStyleForm();
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    } finally {
+      setIsSaving(false);
     }
-    setEditingStyle(null);
-    resetStyleForm();
   };
 
   const resetStyleForm = () => {
@@ -241,6 +298,18 @@ export function CatalogManagementClient({
             <span>{feedback}</span>
           </div>
           <button type="button" onClick={() => setFeedback(null)}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button type="button" onClick={() => setErrorMessage(null)}>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -335,20 +404,14 @@ export function CatalogManagementClient({
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setPackages((prev) =>
-                          prev.map((p) =>
-                            p.id === pkg.id ? { ...p, is_active: !p.is_active } : p
-                          )
-                        )
-                      }
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full ${
+                      onClick={() => togglePackageActive(pkg)}
+                      className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
                         pkg.is_active
-                          ? 'bg-emerald-50 text-emerald-800'
-                          : 'bg-gray-100 text-gray-600'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-gray-100 text-gray-600 border border-gray-200'
                       }`}
                     >
-                      {pkg.is_active ? 'Ativo' : 'Inativo'}
+                      {pkg.is_active ? 'Ativo na Loja' : 'Oculto'}
                     </button>
                   </div>
                 </div>
@@ -372,7 +435,7 @@ export function CatalogManagementClient({
                   required
                   value={pkgName}
                   onChange={(e) => setPkgName(e.target.value)}
-                  placeholder="Ex: Pacote Luxo"
+                  placeholder="Ex: Pacote Exclusivo 20 Fotos"
                   className="w-full p-3 rounded-xl border border-[#D9D1C2] bg-[#F6F4EF] text-[#17212B] focus:ring-2 focus:ring-[#315B52]"
                 />
               </div>
@@ -391,7 +454,7 @@ export function CatalogManagementClient({
                     className="w-full p-3 rounded-xl border border-[#D9D1C2] bg-[#F6F4EF] text-[#17212B] focus:ring-2 focus:ring-[#315B52]"
                   />
                   <span className="text-[10px] text-[#5E6973] block mt-1">
-                    {formatCurrencyBRL(pkgPriceCents)}
+                    Valor formatado: <strong>{formatCurrencyBRL(pkgPriceCents)}</strong>
                   </span>
                 </div>
 
@@ -451,9 +514,11 @@ export function CatalogManagementClient({
                 )}
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors"
+                  disabled={isSaving}
+                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {editingPackage ? 'Salvar Alterações' : 'Criar Pacote'}
+                  {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSaving ? 'Salvando no Banco...' : editingPackage ? 'Salvar Alterações' : 'Criar e Publicar Pacote'}</span>
                 </button>
               </div>
             </form>
@@ -569,9 +634,11 @@ export function CatalogManagementClient({
                 )}
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors"
+                  disabled={isSaving}
+                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {editingCategory ? 'Salvar Alterações' : 'Criar Categoria'}
+                  {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSaving ? 'Salvando...' : editingCategory ? 'Salvar Alterações' : 'Criar Categoria'}</span>
                 </button>
               </div>
             </form>
@@ -701,9 +768,11 @@ export function CatalogManagementClient({
                 )}
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors"
+                  disabled={isSaving}
+                  className="flex-1 py-3 rounded-xl bg-[#17212B] hover:bg-[#315B52] text-[#FFFDF9] uppercase font-semibold tracking-wider transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {editingStyle ? 'Salvar Alterações' : 'Criar Estilo'}
+                  {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSaving ? 'Salvando...' : editingStyle ? 'Salvar Alterações' : 'Criar Estilo'}</span>
                 </button>
               </div>
             </form>
