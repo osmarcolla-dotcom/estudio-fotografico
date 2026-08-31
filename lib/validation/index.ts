@@ -19,9 +19,9 @@ export const customerDataSchema = z.object({
 
 export const orderCreationSchema = z.object({
   customer: customerDataSchema,
-  categoryId: z.string().uuid('Categoria inválida'),
-  styleId: z.string().uuid('Estilo inválido'),
-  packageId: z.string().uuid('Pacote inválido'),
+  categoryId: z.string().min(1, 'Selecione uma categoria'),
+  styleId: z.string().min(1, 'Selecione um estilo'),
+  packageId: z.string().min(1, 'Selecione um pacote'),
   notes: z.string().max(500, 'Observação deve ter no máximo 500 caracteres').optional(),
   uploadedPhotos: z.array(
     z.object({
@@ -37,7 +37,7 @@ export const orderCreationSchema = z.object({
 });
 
 export const revisionRequestSchema = z.object({
-  producedPhotoId: z.string().uuid('Foto inválida').optional(),
+  producedPhotoId: z.string().optional(),
   photoIndex: z.number().int().min(1).optional(),
   reason: z
     .string()
@@ -70,7 +70,7 @@ export const catalogCategorySchema = z.object({
 });
 
 export const catalogStyleSchema = z.object({
-  categoryId: z.string().uuid('Categoria obrigatória'),
+  categoryId: z.string().min(1, 'Categoria obrigatória'),
   name: z.string().min(2, 'Nome é obrigatório'),
   slug: z.string().min(2, 'Slug é obrigatório'),
   description: z.string().optional(),
