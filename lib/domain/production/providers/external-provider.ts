@@ -5,6 +5,9 @@ import {
 } from '../types';
 import { ImageGenerationProvider } from './image-generation-provider';
 
+// Hash oficial testado e aprovado do modelo Flux PuLID no Replicate
+const OFFICIAL_FLUX_PULID_VERSION = '8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b';
+
 export class ExternalImageGenerationProvider implements ImageGenerationProvider {
   name = 'external-replicate-flux';
   private apiToken?: string;
@@ -14,9 +17,14 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
   constructor() {
     this.apiToken = process.env.IMAGE_PROVIDER_API_KEY || process.env.REPLICATE_API_TOKEN;
     this.baseUrl = process.env.IMAGE_PROVIDER_BASE_URL || 'https://api.replicate.com/v1';
-    this.modelVersion =
-      process.env.IMAGE_GENERATION_MODEL ||
-      '8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b';
+
+    const configuredModel = process.env.IMAGE_GENERATION_MODEL;
+    // Se a variável contiver um nome de modelo (ex: 'lucataco/pulid-flux') em vez do hash, usa o hash oficial de 64 caracteres
+    if (configuredModel && configuredModel.length === 64 && /^[0-9a-f]+$/i.test(configuredModel)) {
+      this.modelVersion = configuredModel;
+    } else {
+      this.modelVersion = OFFICIAL_FLUX_PULID_VERSION;
+    }
   }
 
   isConfigured(): boolean {
@@ -87,7 +95,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         let data = await response.json();
 
         // Se bater no rate-limit (429 ou throttled), aguarda 10s e tenta de novo
-        if (response.status === 429 || (data.detail && data.detail.includes('throttled'))) {
+        if (response.status === 429 || (data.detail && String(data.detail).includes('throttled'))) {
           console.warn(`[Replicate] Rate limit atingido. Aguardando 10s para tentativa ${attempt + 1}...`);
           await new Promise((r) => setTimeout(r, 11000));
           continue;
