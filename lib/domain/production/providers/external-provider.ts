@@ -5,10 +5,6 @@ import {
 } from '../types';
 import { ImageGenerationProvider } from './image-generation-provider';
 
-/**
- * Adapter oficial para geração de imagens realistas com preservação facial.
- * Conecta com a API oficial do Replicate executando modelos Flux.1 + PuLID/InstantID.
- */
 export class ExternalImageGenerationProvider implements ImageGenerationProvider {
   name = 'external-replicate-flux';
   private apiToken?: string;
@@ -18,21 +14,17 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
   constructor() {
     this.apiToken = process.env.IMAGE_PROVIDER_API_KEY || process.env.REPLICATE_API_TOKEN;
     this.baseUrl = process.env.IMAGE_PROVIDER_BASE_URL || 'https://api.replicate.com/v1';
-    // Versão oficial do modelo Flux com preservação de identidade por referência facial (PuLID / InstantID)
+    // Versão oficial verificada do Flux PuLID no Replicate com suporte a imagem de referência facial
     this.modelVersion =
       process.env.IMAGE_GENERATION_MODEL ||
-      'flux-pulid-controlnet';
+      '8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b';
   }
 
   isConfigured(): boolean {
     return Boolean(this.apiToken && this.apiToken.trim().length > 10);
   }
 
-  /**
-   * 1. Análise técnica da foto original da pessoa
-   */
   async analyzeImage(imageUrl: string): Promise<ImageAnalysisResult> {
-    // Se a API estiver configurada, podemos extrair as características biométricas e visuais da pessoa
     return {
       people_count: 1,
       face_detected: true,
@@ -57,9 +49,6 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
     };
   }
 
-  /**
-   * 2. Geração assíncrona de fotografia individual no provedor externo
-   */
   async generateImage(params: GenerateImageParams): Promise<GenerationResult> {
     const startTime = Date.now();
 
@@ -67,38 +56,32 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
       return {
         success: false,
         providerJobId: `unconfigured-${params.sessionId}-${params.photoIndex}`,
-        errorMessage: 'Chave da API externa de geração de imagens não configurada.',
+        errorMessage: 'Chave da API do Replicate não configurada.',
       };
     }
 
     try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const webhookUrl = `${appUrl}/api/webhooks/image-generation`;
-
-      // Chamada HTTP para iniciar a produção da foto no modelo Flux PuLID
       const response = await fetch(`${this.baseUrl}/predictions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiToken}`,
+          Authorization: `Token ${this.apiToken}`,
         },
         body: JSON.stringify({
           version: this.modelVersion,
           input: {
             prompt: params.prompt,
-            negative_prompt: params.negativePrompt,
+            negative_prompt: params.negativePrompt || 'deformed, blurry, bad anatomy, cartoon, duplicate face, plastic skin',
             main_face_image: params.sourceImageUrl,
-            image: params.sourceImageUrl,
-            num_outputs: 1,
-            aspect_ratio: params.variation.aspect_ratio === '1:1' ? '1:1' : '4:5',
+            width: 896,
+            height: 1152,
+            num_steps: 20,
+            guidance_scale: 4.0,
             id_weight: params.facePreservationWeight || 0.95,
-            guidance_scale: params.guidanceScale || 7.5,
             seed: params.seed || Math.floor(Math.random() * 1000000),
             output_format: 'jpg',
             output_quality: 95,
           },
-          webhook: webhookUrl,
-          webhook_events_filter: ['completed'],
         }),
       });
 
@@ -106,10 +89,9 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
       const durationMs = Date.now() - startTime;
 
       if (!response.ok) {
-        throw new Error(data.detail || data.error || data.message || 'Erro na requisição ao provedor externo.');
+        throw new Error(data.detail || data.error || data.title || 'Erro na requisição ao Replicate.');
       }
 
-      // Se a geração for síncrona ou já tiver retornado a imagem
       const imageUrl = Array.isArray(data.output) ? data.output[0] : data.output;
 
       return {
@@ -118,7 +100,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         imageUrl: imageUrl || undefined,
         seed: data.seed || params.seed,
         durationMs,
-        estimatedCostCents: 8, // ~R$ 0,08 por foto gerada
+        estimatedCostCents: 8,
         rawResponse: data,
       };
     } catch (err: any) {
@@ -126,14 +108,11 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         success: false,
         providerJobId: `err-${params.photoIndex}-${Date.now()}`,
         durationMs: Date.now() - startTime,
-        errorMessage: err.message || 'Falha de comunicação com o provedor externo.',
+        errorMessage: err.message || 'Falha de comunicação com o Replicate.',
       };
     }
   }
 
-  /**
-   * 3. Checagem de status assíncrono (Polling)
-   */
   async checkGenerationStatus(providerJobId: string): Promise<{
     status: 'COMPLETED' | 'PROCESSING' | 'FAILED';
     imageUrl?: string;
@@ -146,7 +125,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
     try {
       const res = await fetch(`${this.baseUrl}/predictions/${providerJobId}`, {
         headers: {
-          Authorization: `Bearer ${this.apiToken}`,
+          Authorization: `Token ${this.apiToken}`,
         },
       });
       const data = await res.json();
@@ -157,7 +136,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
       }
 
       if (data.status === 'failed' || data.status === 'canceled') {
-        return { status: 'FAILED', errorMessage: data.error || 'Geração cancelada ou rejeitada pelo provedor.' };
+        return { status: 'FAILED', errorMessage: data.error || 'Geração cancelada ou rejeitada.' };
       }
 
       return { status: 'PROCESSING' };

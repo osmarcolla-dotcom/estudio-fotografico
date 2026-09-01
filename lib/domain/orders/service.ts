@@ -12,7 +12,6 @@ export class OrderService {
     const token = crypto.randomBytes(24).toString('hex');
     const orderId = crypto.randomUUID();
 
-    // Valores padrão de fallback
     let categoryName = 'Ensaio Personalizado';
     let packageName = 'Pacote Selecionado';
     let packagePhotoCount = 6;
@@ -21,7 +20,7 @@ export class OrderService {
 
     if (supabase) {
       try {
-        // 1. Busca os dados REAIS e dinâmicos do pacote, categoria e estilo no Supabase
+        // 1. Busca os dados do pacote, categoria e estilo no Supabase
         const [pkgRes, catRes, styRes] = await Promise.all([
           supabase.from('packages').select('*').eq('id', input.packageId).maybeSingle(),
           supabase.from('categories').select('*').eq('id', input.categoryId).maybeSingle(),
@@ -55,7 +54,7 @@ export class OrderService {
           if (fallbackSty) styleName = fallbackSty.name;
         }
 
-        // 2. Criar ou atualizar cliente (por WhatsApp ou E-mail)
+        // 2. Criar ou atualizar cliente
         let customerId: string;
         const cleanPhone = input.customer.whatsapp.replace(/\D/g, '');
         const customerEmail = input.customer.email || `${cleanPhone}@cliente.estudio`;
@@ -90,7 +89,7 @@ export class OrderService {
           customerId = newCustomer.id;
         }
 
-        // 3. Criar Pedido com os valores REAIS congelados
+        // 3. Criar Pedido
         const { error: orderErr } = await supabase.from('orders').insert({
           id: orderId,
           order_number: orderNumber,
@@ -109,7 +108,7 @@ export class OrderService {
 
         if (orderErr) throw new Error(`Falha ao criar pedido: ${orderErr.message}`);
 
-        // 4. Registrar pagamento pendente com o valor exato
+        // 4. Registrar pagamento pendente
         await supabase.from('payments').insert({
           order_id: orderId,
           amount_cents: packagePriceCents,
@@ -117,17 +116,54 @@ export class OrderService {
           provider: process.env.PAYMENT_PROVIDER || 'mercadopago',
         });
 
-        // 5. Registrar fotos enviadas pelo cliente
+        // 5. Fazer upload real do arquivo da foto para o Supabase Storage
         if (input.uploadedPhotos && input.uploadedPhotos.length > 0) {
-          const photoInserts = input.uploadedPhotos.map((p, idx) => ({
-            order_id: orderId,
-            storage_path: p.storagePath || `customer-uploads/${orderId}/photo_${idx + 1}.jpg`,
-            file_name: p.fileName,
-            file_size_bytes: p.fileSize,
-            mime_type: p.mimeType,
-            width: p.width || null,
-            height: p.height || null,
-          }));
+          const photoInserts = await Promise.all(
+            input.uploadedPhotos.map(async (p, idx) => {
+              let photoStorageUrl = p.storagePath || '';
+
+              if (p.base64Data && p.base64Data.startsWith('data:image')) {
+                try {
+                  const base64Clean = p.base64Data.replace(/^data:image\/\w+;base64,/, '');
+                  const buffer = Buffer.from(base64Clean, 'base64');
+                  const ext = p.mimeType.split('/')[1] || 'jpg';
+                  const storagePath = `${orderId}/foto_referencia_${idx + 1}.${ext}`;
+
+                  // Upload no bucket customer-uploads
+                  const { error: upErr } = await supabase.storage
+                    .from('customer-uploads')
+                    .upload(storagePath, buffer, {
+                      contentType: p.mimeType,
+                      upsert: true,
+                    });
+
+                  if (!upErr) {
+                    // Gera URL assinada acessível pela IA
+                    const { data: signed } = await supabase.storage
+                      .from('customer-uploads')
+                      .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 dias
+
+                    if (signed?.signedUrl) {
+                      photoStorageUrl = signed.signedUrl;
+                    }
+                  }
+                } catch (e) {
+                  console.error('Erro ao enviar foto para o Storage:', e);
+                }
+              }
+
+              return {
+                order_id: orderId,
+                storage_path: photoStorageUrl || `customer-uploads/${orderId}/photo_${idx + 1}.jpg`,
+                file_name: p.fileName,
+                file_size_bytes: p.fileSize,
+                mime_type: p.mimeType,
+                width: p.width || null,
+                height: p.height || null,
+              };
+            })
+          );
+
           await supabase.from('customer_photos').insert(photoInserts);
         }
 
@@ -192,7 +228,7 @@ export class OrderService {
       try {
         await supabase.rpc('increment_view_count', { link_token: token });
       } catch {
-        // Silencioso se a RPC não existir
+        // Silencioso
       }
 
       return this.getOrderById(linkData.order_id);
