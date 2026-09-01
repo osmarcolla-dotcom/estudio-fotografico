@@ -61,7 +61,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
     }
 
     try {
-      // 1. Inicia a predição no Replicate com Prefer: wait=60 para aguardar a conclusão
+      // 1. Inicia a predição no Replicate com os parâmetros suportados pelo Flux PuLID
       const response = await fetch(`${this.baseUrl}/predictions`, {
         method: 'POST',
         headers: {
@@ -72,17 +72,13 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         body: JSON.stringify({
           version: this.modelVersion,
           input: {
-            prompt: params.prompt,
-            negative_prompt: params.negativePrompt || 'deformed, blurry, bad anatomy, cartoon, duplicate face, plastic skin, drawing',
             main_face_image: params.sourceImageUrl,
+            prompt: params.prompt,
             width: 896,
             height: 1152,
             num_steps: 20,
             guidance_scale: 4.0,
-            id_weight: params.facePreservationWeight || 0.95,
             seed: params.seed || Math.floor(Math.random() * 1000000),
-            output_format: 'jpg',
-            output_quality: 95,
           },
         }),
       });
@@ -93,7 +89,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         throw new Error(data.detail || data.error || data.title || 'Erro na requisição ao Replicate.');
       }
 
-      // 2. Se não retornou de imediato, faz polling até terminar
+      // 2. Se a predição não foi finalizada imediatamente no wait, faz polling
       if (data.status !== 'succeeded' && data.status !== 'failed' && data.status !== 'canceled') {
         const predictionId = data.id;
         for (let i = 0; i < 30; i++) {
@@ -145,7 +141,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
     try {
       const res = await fetch(`${this.baseUrl}/predictions/${providerJobId}`, {
         headers: {
-          Authorization: `Token ${this.apiToken}`,
+          Authorization: `Bearer ${this.apiToken}`,
         },
       });
       const data = await res.json();
