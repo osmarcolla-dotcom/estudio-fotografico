@@ -121,7 +121,7 @@ export class ProductionOrchestrator {
     } = options;
 
     const sessionId = options.sessionId || `session-${orderId}-${Date.now()}`;
-    let { generationProvider, upscaleProvider } = this.getProviders();
+    const { generationProvider, upscaleProvider } = this.getProviders();
 
     const session: PhotoSession = {
       id: sessionId,
@@ -174,9 +174,16 @@ export class ProductionOrchestrator {
       session.status = 'GENERATING';
       await this.saveSession(session);
 
-      // 4. Execução dos PhotoJobs
-      for (const job of session.photo_jobs) {
-        let processedJob = await JobQueue.processPhotoJob({
+      // 4. Execução dos PhotoJobs com a IA Real (Flux PuLID)
+      for (let i = 0; i < session.photo_jobs.length; i++) {
+        const job = session.photo_jobs[i];
+
+        // Espaçamento inteligente para respeitar a taxa de requisições por minuto da API
+        if (i > 0) {
+          await new Promise((r) => setTimeout(r, 6000));
+        }
+
+        const processedJob = await JobQueue.processPhotoJob({
           sessionId,
           sourceImageUrl,
           identityProfile: session.identity_profile,
@@ -187,24 +194,6 @@ export class ProductionOrchestrator {
           upscaleProvider,
           targetResolution,
         });
-
-        // Se o job não completou (ex: erro no provedor ou falta de saldo na API), usa o MockDevImageProvider com garantia de entrega
-        if (processedJob.status !== 'COMPLETED') {
-          const fallbackMock = new MockDevImageProvider();
-          job.attempts = 0;
-          job.status = 'QUEUED';
-          processedJob = await JobQueue.processPhotoJob({
-            sessionId,
-            sourceImageUrl,
-            identityProfile: session.identity_profile,
-            categorySlug,
-            styleSlug,
-            job,
-            generationProvider: fallbackMock,
-            upscaleProvider: fallbackMock,
-            targetResolution,
-          });
-        }
 
         session.completed_photos = session.photo_jobs.filter(
           (j) => j.status === 'COMPLETED'
@@ -217,7 +206,7 @@ export class ProductionOrchestrator {
       }
 
       // 5. Finalização
-      session.status = 'READY_FOR_REVIEW';
+      session.status = session.completed_photos > 0 ? 'READY_FOR_REVIEW' : 'FAILED';
       session.completed_at = new Date().toISOString();
       await this.saveSession(session);
 
@@ -225,12 +214,12 @@ export class ProductionOrchestrator {
       const supabase = createAdminClient();
       if (supabase) {
         const producedPhotosPayload = session.photo_jobs
-          .filter((j) => j.active_version)
+          .filter((j) => j.active_version && j.active_version.raw_image_url)
           .map((j) => ({
             order_id: orderId,
             photo_index: j.photo_index,
             preview_storage_path: j.active_version!.preview_storage_path || j.active_version!.raw_image_url!,
-            final_storage_path: j.active_version!.final_storage_path || j.active_version!.upscaled_image_url!,
+            final_storage_path: j.active_version!.final_storage_path || j.active_version!.upscaled_image_url! || j.active_version!.raw_image_url!,
             variation_description: `${j.variation.framing} — ${j.variation.pose_description}`,
             is_approved: true,
           }));
@@ -249,6 +238,7 @@ export class ProductionOrchestrator {
 
       return session;
     } catch (err: any) {
+      console.error('Erro na esteira de produção:', err);
       session.status = 'READY_FOR_REVIEW';
       session.completed_at = new Date().toISOString();
       await this.saveSession(session);
@@ -272,7 +262,7 @@ export class ProductionOrchestrator {
     job.attempts = 0;
     job.status = 'QUEUED';
 
-    let updatedJob = await JobQueue.processPhotoJob({
+    const updatedJob = await JobQueue.processPhotoJob({
       sessionId,
       sourceImageUrl,
       identityProfile: session.identity_profile,
@@ -282,22 +272,6 @@ export class ProductionOrchestrator {
       generationProvider,
       upscaleProvider,
     });
-
-    if (updatedJob.status !== 'COMPLETED') {
-      const fallbackMock = new MockDevImageProvider();
-      job.attempts = 0;
-      job.status = 'QUEUED';
-      updatedJob = await JobQueue.processPhotoJob({
-        sessionId,
-        sourceImageUrl,
-        identityProfile: session.identity_profile,
-        categorySlug: session.category_slug,
-        styleSlug: session.style_slug,
-        job,
-        generationProvider: fallbackMock,
-        upscaleProvider: fallbackMock,
-      });
-    }
 
     session.completed_photos = session.photo_jobs.filter(
       (j) => j.status === 'COMPLETED'

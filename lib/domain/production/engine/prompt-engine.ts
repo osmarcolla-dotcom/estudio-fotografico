@@ -25,15 +25,19 @@ export class PromptEngine {
     styleSlug: string,
     totalPhotos: number
   ): ShootPlan {
-    const category = CATEGORY_TEMPLATES[categorySlug] || CATEGORY_TEMPLATES['gravidez'];
-    const style = getStyleProfile(categorySlug, styleSlug);
+    const cleanCat = categorySlug.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+    const cleanStyle = styleSlug.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+
+    const category = CATEGORY_TEMPLATES[cleanCat] || CATEGORY_TEMPLATES['aniversario'] || CATEGORY_TEMPLATES['gravidez'];
+    const style = getStyleProfile(cleanCat, cleanStyle);
 
     const framings: PhotoVariation['framing'][] = [
+      'Primeiro Plano (Close-up)',
       'Plano Médio',
       'Corpo Inteiro',
-      'Primeiro Plano (Close-up)',
       'Plano Americano',
       'Detalhe Artístico',
+      'Plano Médio',
     ];
 
     const variations: PhotoVariation[] = [];
@@ -50,84 +54,66 @@ export class PromptEngine {
         framing,
         setting_scene: `${setting}`,
         lighting_setup: `${lighting}. ${style.lighting_palette}`,
-        composition_rule: i % 2 === 0 ? 'Regra dos terços com espaço negativo elegante' : 'Composição centralizada com linhas de fuga nobres',
+        composition_rule: i % 2 === 0 ? 'rule of thirds, clean luxury depth of field' : 'centered symmetrical composition, dramatic studio lighting',
         wardrobe: style.wardrobe_style,
-        camera_angle: i % 3 === 0 ? 'Ligeiro contra-plongée (ângulo inferior sutil e imponente)' : 'Nível dos olhos com perspectiva natural de 50mm/85mm',
+        camera_angle: i % 3 === 0 ? 'eye level, natural 85mm lens perspective' : 'three-quarter profile angle, flattering studio perspective',
         mood: style.atmosphere,
         aspect_ratio: '4:5',
-        expression: i % 3 === 0 ? 'Olhar sereno e contemplativo no horizonte' : 'Sorriso acolhedor, natural e espontâneo olhando para a lente',
+        expression: i % 2 === 0 ? 'confident gentle smile, radiant happy expression, looking into camera' : 'serene and joyful expression, elegant look',
       });
     }
 
     return {
-      category_slug: categorySlug,
-      style_slug: styleSlug,
+      category_slug: cleanCat,
+      style_slug: cleanStyle,
       total_photos: totalPhotos,
       coherence_guidelines: [
-        'Manter preservação facial e traços físicos idênticos da pessoa original.',
-        `Seguir rigorosamente o estilo visual: ${style.name} (${style.artistic_direction}).`,
-        `Profundidade de campo e câmera: ${style.camera_preset}.`,
-        `Pós-produção e acabamento de cor: ${style.post_processing_finish}.`,
+        'Preservar integralmente os traços faciais, olhos, nariz, boca e cabelo da foto de referência.',
+        `Estilo: ${style.name} (${style.artistic_direction}).`,
+        `Iluminação de estúdio profissional com alta fidelidade de textura de pele.`,
       ],
       variations,
     };
   }
 
   /**
-   * Monta o prompt técnico interno combinando:
-   * IDENTIDADE (prioridade máxima) > ESTILO > VARIAÇÃO DA FOTO
-   * O cliente nunca visualiza esse prompt.
+   * Monta o prompt técnico interno ultra-realista para o modelo Flux PuLID.
    */
   static buildImagePrompt(input: PromptEngineInput): {
     prompt: string;
     negativePrompt: string;
   } {
     const { identityProfile, categorySlug, styleSlug, variation } = input;
-    const category = CATEGORY_TEMPLATES[categorySlug] || CATEGORY_TEMPLATES['gravidez'];
-    const style = getStyleProfile(categorySlug, styleSlug);
+    const cleanCat = categorySlug.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+    const cleanStyle = styleSlug.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+    const style = getStyleProfile(cleanCat, cleanStyle);
 
-    // 1. Identidade (Traços inalteráveis)
-    const identityBlock = [
-      `Masterpiece studio portrait of the exact same subject with: ${identityProfile.face_description}.`,
-      `Hair characteristics: ${identityProfile.hair_description}.`,
-      `Skin tone and natural texture: ${identityProfile.skin_description}.`,
-      identityProfile.apparent_age ? `Apparent age: ${identityProfile.apparent_age}.` : '',
-      identityProfile.distinctive_features && identityProfile.distinctive_features.length > 0
-        ? `Distinctive features preserved: ${identityProfile.distinctive_features.join(', ')}.`
-        : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
+    // Constrói descrição fotográfica de estúdio ultra-realista
+    let themePrompt = '';
 
-    // 2. Variação de Composição e Enquadramento
-    const variationBlock = [
-      `Framing: ${variation.framing}.`,
-      `Pose: ${variation.pose_description}.`,
-      `Setting and Environment: ${variation.setting_scene}.`,
-      `Lighting: ${variation.lighting_setup}.`,
-      `Wardrobe: ${variation.wardrobe}.`,
-      `Expression: ${variation.expression}.`,
-      `Camera perspective: ${variation.camera_angle}, ${variation.composition_rule}.`,
-    ].join(' ');
+    if (cleanCat.includes('aniversario')) {
+      const birthdayProps = [
+        'holding sparkling golden birthday number candles, elegant celebration studio lighting with warm glowing bokeh',
+        'sitting elegantly beside a luxury minimalist birthday cake with lit candles, champagne glass on table, luxury celebration',
+        'joyfully celebrating birthday photoshoot, glamorous luxury party dress, golden metallic balloons in background, warm studio glow',
+        'holding champagne bottle celebrating, beautiful smile, glamorous studio portrait, soft warm golden lighting, high-end magazine photoshoot',
+        'standing with elegant birthday celebration styling, sparkling background bokeh, glamorous makeup and styling',
+        'close-up portrait smiling beside birthday candles, warm soft illumination on face, natural skin texture, 8k commercial photography',
+      ];
+      themePrompt = birthdayProps[(variation.photo_index - 1) % birthdayProps.length];
+    } else if (cleanCat.includes('gravidez')) {
+      themePrompt = `maternity photoshoot, ${variation.pose_description}, wearing ${style.wardrobe_style}, ${variation.setting_scene}, soft natural studio illumination`;
+    } else if (cleanCat.includes('casamento')) {
+      themePrompt = `luxury wedding bridal photoshoot, wearing magnificent bridal wedding gown with intricate details, ${variation.setting_scene}, cinematic romantic studio lighting`;
+    } else if (cleanCat.includes('sensual')) {
+      themePrompt = `boudoir fine art photography, ${variation.pose_description}, ${style.wardrobe_style}, ${variation.setting_scene}, dramatic chiaroscuro soft window lighting`;
+    } else {
+      themePrompt = `${variation.pose_description}, ${variation.setting_scene}, wearing ${style.wardrobe_style}, ${variation.lighting_setup}`;
+    }
 
-    // 3. Estilo e Direção Fotográfica
-    const styleBlock = [
-      `Photography style: ${style.artistic_direction}.`,
-      `Atmosphere: ${style.atmosphere}.`,
-      `Camera & Lens setup: ${style.camera_preset}, ${style.depth_of_field}.`,
-      `Finish: ${style.post_processing_finish}.`,
-      `8k uhd, extremely detailed skin pores, realistic eyes reflection, award winning commercial studio photography, perfect anatomy.`,
-    ].join(' ');
+    const prompt = `Award-winning high-end studio portrait photograph of the subject, ${themePrompt}, ${variation.framing}, ${variation.expression}, ${style.camera_preset}, shot on 85mm f/1.4 lens, 8k resolution, ultra-realistic skin texture, realistic eye reflections, photorealistic commercial studio photography, perfect anatomy`;
 
-    const prompt = `${identityBlock}\n\n${variationBlock}\n\n${styleBlock}`;
-
-    // Negative Prompt rigoroso para garantir alta fidelidade
-    const negativePrompt = [
-      'deformed face, deformed fingers, extra limbs, bad anatomy, mutated hands, poorly drawn face',
-      'plastic skin, fake smooth skin, oversaturated, cartoon, 3d render, illustration, drawing',
-      'blurry, out of focus, low resolution, artifacts, watermark, text, signature, duplicate face',
-      'distorted proportions, crossed eyes, bad eyes, unnatural lighting, harsh flash reflection',
-    ].join(', ');
+    const negativePrompt = 'cartoon, illustration, 3d render, anime, painting, deformed face, bad anatomy, bad eyes, crossed eyes, extra fingers, blurry, low quality, duplicate, oversaturated, plastic skin';
 
     return {
       prompt,

@@ -14,7 +14,6 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
   constructor() {
     this.apiToken = process.env.IMAGE_PROVIDER_API_KEY || process.env.REPLICATE_API_TOKEN;
     this.baseUrl = process.env.IMAGE_PROVIDER_BASE_URL || 'https://api.replicate.com/v1';
-    // Versão oficial verificada do Flux PuLID no Replicate com suporte a imagem de referência facial
     this.modelVersion =
       process.env.IMAGE_GENERATION_MODEL ||
       '8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b';
@@ -60,73 +59,87 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
       };
     }
 
-    try {
-      // 1. Inicia a predição no Replicate com os parâmetros suportados pelo Flux PuLID
-      const response = await fetch(`${this.baseUrl}/predictions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Token ${this.apiToken}`,
-          Prefer: 'wait=60',
-        },
-        body: JSON.stringify({
-          version: this.modelVersion,
-          input: {
-            main_face_image: params.sourceImageUrl,
-            prompt: params.prompt,
-            width: 896,
-            height: 1152,
-            num_steps: 20,
-            guidance_scale: 4.0,
-            seed: params.seed || Math.floor(Math.random() * 1000000),
+    // Tratamento de Rate-Limit / Throttling com retry inteligente e espaçamento
+    let lastError = '';
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const response = await fetch(`${this.baseUrl}/predictions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Token ${this.apiToken}`,
+            Prefer: 'wait=60',
           },
-        }),
-      });
+          body: JSON.stringify({
+            version: this.modelVersion,
+            input: {
+              main_face_image: params.sourceImageUrl,
+              prompt: params.prompt,
+              width: 896,
+              height: 1152,
+              num_steps: 20,
+              guidance_scale: 4.0,
+              seed: params.seed || Math.floor(Math.random() * 1000000),
+            },
+          }),
+        });
 
-      let data = await response.json();
+        let data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.detail || data.error || data.title || 'Erro na requisição ao Replicate.');
-      }
+        // Se bater no rate-limit (429 ou throttled), aguarda 10s e tenta de novo
+        if (response.status === 429 || (data.detail && data.detail.includes('throttled'))) {
+          console.warn(`[Replicate] Rate limit atingido. Aguardando 10s para tentativa ${attempt + 1}...`);
+          await new Promise((r) => setTimeout(r, 11000));
+          continue;
+        }
 
-      // 2. Se a predição não foi finalizada imediatamente no wait, faz polling
-      if (data.status !== 'succeeded' && data.status !== 'failed' && data.status !== 'canceled') {
-        const predictionId = data.id;
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => setTimeout(r, 2500));
-          const checkRes = await fetch(`${this.baseUrl}/predictions/${predictionId}`, {
-            headers: { Authorization: `Token ${this.apiToken}` },
-          });
-          data = await checkRes.json();
-          if (data.status === 'succeeded' || data.status === 'failed' || data.status === 'canceled') {
-            break;
+        if (!response.ok) {
+          throw new Error(data.detail || data.error || data.title || 'Erro na requisição ao Replicate.');
+        }
+
+        // Se a predição foi criada mas ainda está processando
+        if (data.status !== 'succeeded' && data.status !== 'failed' && data.status !== 'canceled') {
+          const predictionId = data.id;
+          for (let i = 0; i < 35; i++) {
+            await new Promise((r) => setTimeout(r, 2500));
+            const checkRes = await fetch(`${this.baseUrl}/predictions/${predictionId}`, {
+              headers: { Authorization: `Token ${this.apiToken}` },
+            });
+            data = await checkRes.json();
+            if (data.status === 'succeeded' || data.status === 'failed' || data.status === 'canceled') {
+              break;
+            }
           }
         }
+
+        if (data.status !== 'succeeded') {
+          throw new Error(data.error || 'A geração no Replicate não foi concluída.');
+        }
+
+        const imageUrl = Array.isArray(data.output) ? data.output[0] : data.output;
+
+        return {
+          success: true,
+          providerJobId: data.id || `ext-${Date.now()}`,
+          imageUrl: imageUrl || undefined,
+          seed: data.seed || params.seed,
+          durationMs: Date.now() - startTime,
+          estimatedCostCents: 8,
+          rawResponse: data,
+        };
+      } catch (err: any) {
+        lastError = err.message || 'Erro de comunicação com o Replicate';
+        console.warn(`Tentativa ${attempt} falhou: ${lastError}`);
+        await new Promise((r) => setTimeout(r, 5000));
       }
-
-      if (data.status !== 'succeeded') {
-        throw new Error(data.error || 'A geração no Replicate não foi concluída com sucesso.');
-      }
-
-      const imageUrl = Array.isArray(data.output) ? data.output[0] : data.output;
-
-      return {
-        success: true,
-        providerJobId: data.id || `ext-${Date.now()}`,
-        imageUrl: imageUrl || undefined,
-        seed: data.seed || params.seed,
-        durationMs: Date.now() - startTime,
-        estimatedCostCents: 8,
-        rawResponse: data,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        providerJobId: `err-${params.photoIndex}-${Date.now()}`,
-        durationMs: Date.now() - startTime,
-        errorMessage: err.message || 'Falha de comunicação com o Replicate.',
-      };
     }
+
+    return {
+      success: false,
+      providerJobId: `err-${params.photoIndex}-${Date.now()}`,
+      durationMs: Date.now() - startTime,
+      errorMessage: lastError,
+    };
   }
 
   async checkGenerationStatus(providerJobId: string): Promise<{
