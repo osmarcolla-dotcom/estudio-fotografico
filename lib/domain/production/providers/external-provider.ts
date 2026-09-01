@@ -61,17 +61,19 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
     }
 
     try {
+      // 1. Inicia a predição no Replicate com Prefer: wait=60 para aguardar a conclusão
       const response = await fetch(`${this.baseUrl}/predictions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Token ${this.apiToken}`,
+          Prefer: 'wait=60',
         },
         body: JSON.stringify({
           version: this.modelVersion,
           input: {
             prompt: params.prompt,
-            negative_prompt: params.negativePrompt || 'deformed, blurry, bad anatomy, cartoon, duplicate face, plastic skin',
+            negative_prompt: params.negativePrompt || 'deformed, blurry, bad anatomy, cartoon, duplicate face, plastic skin, drawing',
             main_face_image: params.sourceImageUrl,
             width: 896,
             height: 1152,
@@ -85,11 +87,29 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         }),
       });
 
-      const data = await response.json();
-      const durationMs = Date.now() - startTime;
+      let data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.detail || data.error || data.title || 'Erro na requisição ao Replicate.');
+      }
+
+      // 2. Se não retornou de imediato, faz polling até terminar
+      if (data.status !== 'succeeded' && data.status !== 'failed' && data.status !== 'canceled') {
+        const predictionId = data.id;
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 2500));
+          const checkRes = await fetch(`${this.baseUrl}/predictions/${predictionId}`, {
+            headers: { Authorization: `Token ${this.apiToken}` },
+          });
+          data = await checkRes.json();
+          if (data.status === 'succeeded' || data.status === 'failed' || data.status === 'canceled') {
+            break;
+          }
+        }
+      }
+
+      if (data.status !== 'succeeded') {
+        throw new Error(data.error || 'A geração no Replicate não foi concluída com sucesso.');
       }
 
       const imageUrl = Array.isArray(data.output) ? data.output[0] : data.output;
@@ -99,7 +119,7 @@ export class ExternalImageGenerationProvider implements ImageGenerationProvider 
         providerJobId: data.id || `ext-${Date.now()}`,
         imageUrl: imageUrl || undefined,
         seed: data.seed || params.seed,
-        durationMs,
+        durationMs: Date.now() - startTime,
         estimatedCostCents: 8,
         rawResponse: data,
       };
